@@ -1,15 +1,12 @@
 package pop
 
 import (
-	"database/sql"
 	"fmt"
 	"reflect"
 	"regexp"
 	"strconv"
 
-	"github.com/gobuffalo/pop/associations"
 	"github.com/gobuffalo/uuid"
-	"github.com/pkg/errors"
 )
 
 var rLimitOffset = regexp.MustCompile("(?i)(limit [0-9]+ offset [0-9]+)$")
@@ -69,7 +66,7 @@ func (q *Query) First(model interface{}) error {
 	}
 
 	if q.eager {
-		return q.eagerAssociations(model)
+		return q.eagerLoad(model)
 	}
 	return nil
 }
@@ -101,7 +98,7 @@ func (q *Query) Last(model interface{}) error {
 	}
 
 	if q.eager {
-		return q.eagerAssociations(model)
+		return q.eagerLoad(model)
 	}
 
 	return nil
@@ -145,7 +142,7 @@ func (q *Query) All(models interface{}) error {
 	}
 
 	if q.eager {
-		return q.eagerAssociations(models)
+		return q.eagerLoad(models)
 	}
 
 	return nil
@@ -159,82 +156,7 @@ func (q *Query) All(models interface{}) error {
 func (c *Connection) Load(model interface{}, fields ...string) error {
 	q := Q(c)
 	q.eagerFields = fields
-	return q.eagerAssociations(model)
-}
-
-func (q *Query) eagerAssociations(model interface{}) error {
-	var err error
-
-	// eagerAssociations for a slice or array model passed as a param.
-	v := reflect.ValueOf(model)
-	if reflect.Indirect(v).Kind() == reflect.Slice ||
-		reflect.Indirect(v).Kind() == reflect.Array {
-		v = v.Elem()
-		for i := 0; i < v.Len(); i++ {
-			err = q.eagerAssociations(v.Index(i).Addr().Interface())
-			if err != nil {
-				return err
-			}
-		}
-		return err
-	}
-
-	assos, err := associations.AssociationsForStruct(model, q.eagerFields...)
-
-	if err != nil {
-		return err
-	}
-
-	for _, association := range assos {
-		if association.Skipped() {
-			continue
-		}
-
-		query := Q(q.Connection)
-		query.eager = false
-
-		whereCondition, args := association.Constraint()
-		query = query.Where(whereCondition, args...)
-
-		// validates if association is Sortable
-		sortable := (*associations.AssociationSortable)(nil)
-		t := reflect.TypeOf(association)
-		if t.Implements(reflect.TypeOf(sortable).Elem()) {
-			m := reflect.ValueOf(association).MethodByName("OrderBy")
-			out := m.Call([]reflect.Value{})
-			orderClause := out[0].String()
-			if orderClause != "" {
-				query = query.Order(orderClause)
-			}
-		}
-
-		sqlSentence, args := query.ToSQL(&Model{Value: association.Interface()})
-		query = query.RawQuery(sqlSentence, args...)
-
-		if association.Kind() == reflect.Slice || association.Kind() == reflect.Array {
-			err = query.All(association.Interface())
-		}
-
-		if association.Kind() == reflect.Struct {
-			err = query.First(association.Interface())
-		}
-
-		if err != nil && errors.Cause(err) != sql.ErrNoRows {
-			return err
-		}
-
-		// load all inner associations.
-		innerAssociations := association.InnerAssociations()
-		for _, inner := range innerAssociations {
-			v = reflect.Indirect(reflect.ValueOf(model)).FieldByName(inner.Name)
-			q.eagerFields = []string{inner.Fields}
-			err = q.eagerAssociations(v.Addr().Interface())
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return q.eagerLoad(model)
 }
 
 // Exists returns true/false if a record exists in the database that matches

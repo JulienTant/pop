@@ -9,6 +9,7 @@ type Query struct {
 	limitResults            int
 	eager                   bool
 	eagerFields             []string
+	eagerMode               eagerMode
 	whereClauses            clauses
 	orderClauses            clauses
 	fromClauses             fromClauses
@@ -136,6 +137,7 @@ func Q(c *Connection) *Query {
 		Connection:  c,
 		eager:       c.eager,
 		eagerFields: c.eagerFields,
+		eagerMode:   eagerNotSpecified,
 	}
 }
 
